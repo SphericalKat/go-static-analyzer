@@ -4,5 +4,7 @@ import "context"
 
 func main() {
 	ctx, _ := context.WithCancel(context.Background())
-	print(ctx)
+
+	// just to discard ctx
+	_ = ctx
 }

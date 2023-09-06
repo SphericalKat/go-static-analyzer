@@ -23,38 +23,61 @@ var IgnoredCancelAnalyzer = &analysis.Analyzer{
 			foundIgnoredCancel := false // flag
 
 			// confirm node is indeed an AssignStmt
-			switch node := n.(type) {
-			case *ast.AssignStmt:
-				// DFS on the node's children
-				ast.Inspect(node, func(n ast.Node) bool {
-					// loop through all the RHS nodes
-					for _, expr := range node.Rhs {
-						switch e := expr.(type) {
-						// check if any are CallExprs
-						case *ast.CallExpr:
-							switch fExpr := e.Fun.(type) {
-							// if yes, check what kind of function was called. 
-							case *ast.SelectorExpr:
-								switch sExpr := fExpr.X.(type) {
-								case *ast.Ident:
-									if (sExpr.Name == "context" && fExpr.Sel.Name == "WithCancel") {
-										for i, lhsExpr := range node.Lhs {
-											switch lExpr := lhsExpr.(type) {
-											case *ast.Ident:
-												if i == 1 && lExpr.Name == "_" {
-													foundIgnoredCancel = true
-													return false
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-					return true
-				})
+			node, ok := n.(*ast.AssignStmt)
+			if !ok {
+				return
 			}
+
+			// DFS on the node's children
+			ast.Inspect(node, func(n ast.Node) bool {
+				// len(RHS) can only be 1 if it's a multi-return function
+				// ignore all other cases
+				if len(node.Rhs) > 1 {
+					return false
+				}
+
+				// assert that the RHS is a function call expression
+				e, ok := node.Rhs[0].(*ast.CallExpr)
+				if !ok {
+					return false
+				}
+
+				// assert that the function call is a selector expression
+				fExpr, ok := e.Fun.(*ast.SelectorExpr)
+				if !ok {
+					return false
+				}
+
+				// assert that the expression in selector is an identifier
+				// because it is an import of "context"
+				sExpr, ok := fExpr.X.(*ast.Ident)
+				if !ok {
+					return false
+				}
+
+				// if the function signature matches
+				if sExpr.Name != "context" || fExpr.Sel.Name != "WithCancel" {
+					return false
+				}
+
+				// if lhs has more or less variables, something is very wrong
+				if len(node.Lhs) != 2 {
+					return false
+				}
+
+				// assert that the lhs is just an identifier
+				lExpr, ok := node.Lhs[1].(*ast.Ident)
+				if !ok {
+					return false
+				}
+
+				if lExpr.Name == "_" {
+					foundIgnoredCancel = true
+					return false
+				}
+
+				return true
+			})
 			if foundIgnoredCancel {
 				p.Reportf(n.Pos(), "found ignored cancelFunc on context.WithCancel")
 			}
